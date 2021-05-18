@@ -1,46 +1,91 @@
 package main
 
 import (
+	"flag"
 	"fmt"
+	"io"
+	"log"
 	"math"
 	"math/cmplx"
+	"net/http"
+	"os"
 )
 
-const (
-	width, height = 600, 320
-	cells = 100
-	xyrange = 30.0
-	xyscale= width/2/xyrange
-	zscale = height * 0.4
-	angle = math.Pi/6
+const help = `
+Generates the graph of the complex function 1/(1 + 𝑧²), and writes an svg file to std out`
+
+var (
+	flagHelp    = flag.Bool("help", false, "print usage and help, and exit")
+	flagAddress = flag.String("a", "", "address on which to listen")
+	flagWidth = flag.Int("w", 600, "width")
+	flagHeight = flag.Int("h", 320, "height")
+	flagXYRange = flag.Float64("r", 30.0, "range for x, y")
+	flagCells = flag.Int("c", 100, "number of cells")
+	flagScaleFactor = flag.Float64("s", 0.4, "scale factor")
+	flagAngle = flag.Float64("angle", 1.0/12.0, "fraction of a circle to rotate by")
 )
 
-var sin30, cos30 = math.Sin(angle), math.Cos(angle)
-
-func main(){
-	fmt.Printf("<svg xmlns='http://www.w3.org/2000/svg' "+
-		"style='stroke: grey; fill:white ; stroke-width: 0.7' "+
-		"width='%d' height='%d'>", width, height)
-	for i := 0; i< cells;i++{
-		for j := 0; j< cells;j++{
-			ax, ay := corner(i+1, j)
-			bx, by := corner(i,j)
-			cx,cy := corner(i,j+1)
-			dx, dy := corner(i+1,j+1)
-			fmt.Printf("<polygon points ='%g,%g %g,%g %g,%g %g,%g'/>\n",
-				ax, ay, bx ,by ,cx,cy,dx,dy)
-		}
+func usage() {
+	fmt.Fprintf(os.Stderr, "Usage of complex-analysis:\n")
+	fmt.Fprintf(os.Stderr, "\tcomplex-analysis [-a address] [-w width] [-h height] [-r range] [-c cells] [-s scale-factor] [-a angle]\n")
+	if *flagHelp {
+		fmt.Fprintln(os.Stderr, help)
 	}
-	fmt.Println("</svg>")
+	fmt.Fprintf(os.Stderr, "Flags:\n")
+	flag.PrintDefaults()
 }
 
-func corner(i, j int)(float64, float64){
-	x := xyrange * (float64(i)/cells-0.5)
-	y := xyrange * (float64(j)/cells - 0.5)
+var defaultParam params
+
+type params struct{
+	width, height, cells int
+	xyrange, xyscale, zscale, angle float64
+}
+
+func main(){
+	log.SetPrefix("px: ")
+	log.SetFlags(0)
+
+	flag.Usage = usage
+	flag.Parse()
+
+	if *flagHelp {
+		flag.Usage()
+		os.Exit(2)
+	}
+	if flag.NArg() != 0 {
+		fmt.Fprintln(os.Stderr, "does not take any operands")
+		flag.Usage()
+		os.Exit(2)
+	}
+	defaultParam.width = *flagWidth
+	defaultParam.height = *flagHeight
+	defaultParam.cells = *flagCells
+	defaultParam.xyrange = *flagXYRange
+	defaultParam.xyscale= float64(defaultParam.width)/2.0/defaultParam.xyrange
+	defaultParam.zscale = float64(defaultParam.height) * *flagScaleFactor
+	defaultParam.angle = 2* math.Pi * *flagAngle
+	if *flagAddress == "" {
+		writesvg(os.Stdout, &defaultParam)
+		return
+	}
+	http.HandleFunc("/", handler)
+	log.Fatal(http.ListenAndServe(*flagAddress, nil))
+}
+
+func handler(w http.ResponseWriter, r *http.Request){
+	w.Header().Set("Content-Type", "image/svg+xml")
+	writesvg(w, &defaultParam)
+	//TODO: create parameter here
+}
+
+func corner(i, j int, p *params)(float64, float64){
+	x := p.xyrange * (float64(i)/float64(p.cells)-0.5)
+	y := p.xyrange * (float64(j)/float64(p.cells) - 0.5)
 	cnum := complex(x,y)
 	z:= f(cnum)
-	sx := width/2+(x-y)*cos30*xyscale
-	sy:=height/2+(x+y)*sin30*xyscale -z*zscale
+	sx := float64(p.width)/2+(x-y)*math.Cos(p.angle)*p.xyscale
+	sy:=float64(p.height)/2+(x+y)*math.Sin(p.angle)*p.xyscale -z*p.zscale
 	return sx, sy
 }
 
@@ -49,3 +94,19 @@ func f(cnum complex128) float64{
 	return cmplx.Abs(z)
 }
 
+func writesvg(w io.Writer, p *params){
+	fmt.Fprintf(w, "<svg xmlns='http://www.w3.org/2000/svg' "+
+		"style='stroke: grey; fill:white ; stroke-width: 0.7' "+
+		"width='%d' height='%d'>", p.width, p.height)
+	for i := 0; i< p.cells;i++{
+		for j := 0; j< p.cells;j++{
+			ax, ay := corner(i+1, j, p)
+			bx, by := corner(i,j, p)
+			cx,cy := corner(i,j+1, p)
+			dx, dy := corner(i+1,j+1, p)
+			fmt.Fprintf(w, "<polygon points ='%g,%g %g,%g %g,%g %g,%g'/>\n",
+				ax, ay, bx ,by ,cx,cy,dx,dy)
+		}
+	}
+	fmt.Fprintln(w, "</svg>")
+}
