@@ -9,6 +9,7 @@ import (
 	"math/cmplx"
 	"net/http"
 	"os"
+	"strconv"
 )
 
 const help = `
@@ -39,7 +40,7 @@ var defaultParam params
 
 type params struct{
 	width, height, cells int
-	xyrange, xyscale, zscale, angle float64
+	xyrange, xyscale, zscale, scaleFactor, angle float64
 }
 
 func main(){
@@ -74,9 +75,32 @@ func main(){
 }
 
 func handler(w http.ResponseWriter, r *http.Request){
+	params := defaultParam
+	q := r.URL.Query()
+	width, err := strconv.Atoi(q.Get("width"))
+	if err == nil && width > 0 {
+		params.width = width
+	}
+	height, err := strconv.Atoi(q.Get("height"))
+	if err == nil && height > 0 {
+		params.height = height
+	}
+	cells, err := strconv.Atoi(q.Get("cells"))
+	if err == nil && cells > 0 {
+		params.cells = cells
+	}
+	scaleFactor, err := strconv.ParseFloat(q.Get("scalefactor"), 64)
+	if err == nil && scaleFactor > 0 {
+		params.scaleFactor = scaleFactor
+	}
+	angle, err := strconv.ParseFloat(q.Get("angle"), 64)
+	if err == nil && angle > 0 {
+		params.angle = angle
+	}
+	params.xyscale= float64(params.width)/2.0/params.xyrange
+	params.zscale = float64(params.height) * params.scaleFactor
 	w.Header().Set("Content-Type", "image/svg+xml")
-	writesvg(w, &defaultParam)
-	//TODO: create parameter here
+	writesvg(w, &params)
 }
 
 func corner(i, j int, p *params)(float64, float64){
